@@ -2,7 +2,6 @@
 #include <vector>
 #include <cmath>
 #include <cstdlib>
-#include <ctime>
 
 class Robot_Blaster : public RobotBase
 {
@@ -11,32 +10,31 @@ private:
     int target_col;
     bool has_target;
     int scan_direction;
-    bool in_hiding_spot;
-    int turns_waiting;
+    int stuck_counter;
+    int last_row;
+    int last_col;
 
 public:
-    Robot_Blaster() : RobotBase(3, 4, grenade), // Balanced: 3 move, 4 armor
+    Robot_Blaster() : RobotBase(2, 5, grenade), 
                       target_row(-1), target_col(-1), 
-                      has_target(false), scan_direction(1),
-                      in_hiding_spot(false), turns_waiting(0) {
-        srand(time(nullptr) + getpid());
-    }
+                      has_target(false), scan_direction(0),
+                      stuck_counter(0), last_row(-1), last_col(-1) {}
 
     void get_radar_direction(int& radar_direction) override {
-        // Cycle through all directions
+        // Cycle through all directions to find enemies
         scan_direction++;
-        if (scan_direction > 8) scan_direction = 1;
+        if (scan_direction > 8) scan_direction = 0;
         radar_direction = scan_direction;
     }
 
     void process_radar_results(const std::vector<RadarObj>& radar_results) override {
         has_target = false;
         
+        // Find closest robot
         int curr_row, curr_col;
         get_current_location(curr_row, curr_col);
-        
-        // Find closest enemy
         int closest_dist = 9999;
+        
         for (const auto& obj : radar_results) {
             if (obj.m_type == 'R') {
                 int dist = abs(obj.m_row - curr_row) + abs(obj.m_col - curr_col);
@@ -51,7 +49,6 @@ public:
     }
 
     bool get_shot_location(int& shot_row, int& shot_col) override {
-        // Only shoot if we have grenades and a clear target
         if (has_target && get_grenades() > 0) {
             shot_row = target_row;
             shot_col = target_col;
@@ -64,45 +61,41 @@ public:
         int curr_row, curr_col;
         get_current_location(curr_row, curr_col);
         
-        // Check if in corner (hiding spot)
-        bool in_corner = (curr_row <= 1 || curr_row >= m_board_row_max - 2) &&
-                        (curr_col <= 1 || curr_col >= m_board_col_max - 2);
-        
-        if (in_corner) {
-            in_hiding_spot = true;
-            turns_waiting++;
-            
-            // Stay hidden, only move if enemy is very close
-            if (has_target && 
-                abs(target_row - curr_row) < 5 && 
-                abs(target_col - curr_col) < 5) {
-                // Enemy too close, reposition
-                move_direction = 1 + (rand() % 8);
-                move_distance = 1;
-            } else {
-                // Stay put
-                move_direction = 0;
-                move_distance = 0;
-            }
+        // Check if stuck
+        if (curr_row == last_row && curr_col == last_col) {
+            stuck_counter++;
         } else {
-            // Not in corner yet, move to nearest corner
-            if (curr_row < m_board_row_max / 2) {
-                // Top half - go to top corner
-                if (curr_col < m_board_col_max / 2) {
-                    move_direction = 8; // Up-left
-                } else {
-                    move_direction = 2; // Up-right
-                }
-            } else {
-                // Bottom half - go to bottom corner
-                if (curr_col < m_board_col_max / 2) {
-                    move_direction = 6; // Down-left
-                } else {
-                    move_direction = 4; // Down-right
-                }
-            }
-            move_distance = 2; // Move quickly to corner
+            stuck_counter = 0;
         }
+        last_row = curr_row;
+        last_col = curr_col;
+        
+        // If stuck, try random direction
+        if (stuck_counter > 3) {
+            move_direction = 1 + (rand() % 8);
+            move_distance = 1;
+            stuck_counter = 0;
+            return;
+        }
+        
+        // Move toward center or hunt
+        int center_row = m_board_row_max / 2;
+        int center_col = m_board_col_max / 2;
+        
+        int dr = center_row - curr_row;
+        int dc = center_col - curr_col;
+        
+        // Pick direction based on largest difference
+        if (abs(dr) > abs(dc)) {
+            move_direction = (dr > 0) ? 5 : 1; // Down or Up
+        } else if (abs(dc) > 0) {
+            move_direction = (dc > 0) ? 3 : 7; // Right or Left
+        } else {
+            // At center, patrol randomly
+            move_direction = 1 + (rand() % 8);
+        }
+        
+        move_distance = 2;
     }
 };
 
